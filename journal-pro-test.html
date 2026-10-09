@@ -58,26 +58,44 @@ $('month').addEventListener('change',()=>{render();$('deleteMonth').disabled=$('
 $('deleteMonth').onclick=async()=>{
   if(!currentUser)return;
   const month=$('month').value;
-  if(!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)){alert('Selecciona primero un mes específico.');return}
+  if(!/^\d{4}-(0[1-9]|1[0-2])$/.test(month)){
+    alert('Selecciona primero un mes específico.');return;
+  }
   const start=month+'-01';
   const [year,mo]=month.split('-').map(Number);
   const end=new Date(Date.UTC(year,mo,1)).toISOString().slice(0,10);
-  const {count,error:countError}=await db.from('schwab_transactions').select('id',{count:'exact',head:true}).eq('user_id',currentUser.id).gte('transaction_date',start).lt('transaction_date',end);
-  if(countError){alert('No se pudo verificar el mes: '+countError.message);return}
-  if(!count){alert('No hay transacciones guardadas en ese mes.');return}
-  if(!confirm(`Se eliminarán ${count} movimientos de ${month} de Supabase. Esto puede afectar el portafolio y el P&L hasta que vuelvas a importar el CSV completo. ¿Continuar?`))return;
-  const typed=prompt(`Para confirmar, escribe exactamente ${month}. Conserva tu CSV completo antes de borrar.`);
+  const base=()=>db.from('schwab_transactions').select('id',{count:'exact',head:true}).eq('user_id',currentUser.id);
+  const [{count:monthCount,error:monthError},{count:beforeTotal,error:totalError}]=await Promise.all([
+    base().gte('transaction_date',start).lt('transaction_date',end),base()
+  ]);
+  if(monthError||totalError){alert('No se pudo verificar el historial. No se borró nada.');return}
+  if(!monthCount){alert('No hay transacciones guardadas en ese mes.');return}
+  const otherCount=beforeTotal-monthCount;
+  if(!confirm(`Borrar SOLO ${monthCount} movimientos de ${month}?\nSe conservarán ${otherCount} movimientos de otros meses.\n\n¿Continuar?`))return;
+  const typed=prompt(`Confirma escribiendo exactamente ${month}.`);
   if(typed!==month){if(typed!==null)alert('Confirmación incorrecta. No se borró nada.');return}
   const button=$('deleteMonth');button.disabled=true;
   try{
-    $('status').textContent='Eliminando únicamente '+month+'…';
-    // RLS protege la cuenta; filtro explícito por usuario y rango [inicio, fin).
-    const {error}=await db.from('schwab_transactions').delete().eq('user_id',currentUser.id).gte('transaction_date',start).lt('transaction_date',end);
+    $('status').textContent='Borrando únicamente '+month+'…';
+    const {data:deleted,error}=await db.from('schwab_transactions').delete()
+      .eq('user_id',currentUser.id).gte('transaction_date',start).lt('transaction_date',end)
+      .select('id,transaction_date');
     if(error)throw error;
+    const {count:afterTotal,error:checkError}=await base();
+    if(checkError)throw checkError;
+    // Mostrar siempre todos los meses tras el borrado: el filtro anterior puede parecer que se borró todo.
+    $('month').value='all';
     await restore();
-    if(!rows.length){closed=[];unmatched=[];netTransfers=0;$('status').textContent='Mes eliminado. No quedan movimientos. Importa el CSV completo.';$('month').innerHTML='<option value="all">Todos</option>';}
-    else $('status').insertAdjacentHTML('afterbegin',`<p class="green">✓ Registros de ${month} eliminados. Importa ahora el CSV COMPLETO y verifica el resultado.</p>`);
-  }catch(err){$('status').textContent='Error al borrar: '+err.message+'; comprueba los registros antes de repetir.'}
+    if(!rows.length){
+      closed=[];unmatched=[];netTransfers=0;
+      $('pnl').textContent='—';$('closed').textContent='—';$('win').textContent='—';
+      $('month').innerHTML='<option value="all">Todos</option>';
+      $('calendar').innerHTML='';$('symbols').innerHTML='';$('trades').innerHTML='';
+    }
+    $('month').value='all';render();
+    const actual=deleted?.length??0;
+    $('status').textContent=`✓ Se eliminaron ${actual} movimientos de ${month}. Quedan ${afterTotal} movimientos. ${afterTotal===otherCount?'Los otros meses se conservaron.':'ATENCIÓN: el total restante no coincide con la verificación previa; revisa Supabase antes de hacer otra operación.'}`;
+  }catch(err){$('status').textContent='Error: '+err.message+'; revisa Supabase antes de intentar de nuevo.'}
   finally{button.disabled=$('month').value==='all'}
 };
 $('prev').onclick=()=>{displayMonth=new Date(displayMonth.getFullYear(),displayMonth.getMonth()-1,1);calendar()};
