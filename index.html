@@ -7,9 +7,20 @@
 <div id="app" class="hidden"><div class="notice">🔐 Los registros se consultan mediante tu sesión y las políticas RLS de Supabase. No guardes contraseñas ni claves secretas en esta página.</div><section class="grid"><div class="card metric"><small>Mes seleccionado</small><strong id="monthTotal">$0.00</strong></div><div class="card metric"><small>Semana seleccionada (lun–dom)</small><strong id="weekTotal">$0.00</strong></div><div class="card metric"><small>Día seleccionado</small><strong id="dayTotal">$0.00</strong></div><div class="card metric"><small>Operaciones ganadoras / cerradas</small><strong id="winRate">0 / 0</strong></div></section><div class="main"><section class="card"><div class="row between"><h2>📅 Calendario</h2><div class="row"><button id="prevMonth" aria-label="Mes anterior">‹</button><strong id="monthLabel"></strong><button id="nextMonth" aria-label="Mes siguiente">›</button></div></div><div class="calendar" id="calendar"></div><p class="muted" style="font-size:.8rem">Verde: ganancia neta · Rojo: pérdida neta · Selecciona un día para ver sus operaciones.</p></section><section class="card"><h2 id="formTitle">➕ Registrar operación</h2><form id="tradeForm"><div class="formgrid"><label class="field">Fecha<input id="tradeDate" type="date" required></label><label class="field">Ticker<input id="ticker" maxlength="15" placeholder="SPY" required></label><label class="field">Tipo<select id="optionType"><option>CALL</option><option>PUT</option></select></label><label class="field">Contratos<input id="contracts" type="number" min="1" step="1" value="1" required></label><label class="field">Prima compra ($)<input id="buyPrice" type="number" min="0" step="0.0001" required placeholder="0.80"></label><label class="field">Prima venta ($)<input id="sellPrice" type="number" min="0" step="0.0001" placeholder="1.20"></label><label class="field span2">Comisiones totales ($)<input id="commission" type="number" min="0" step="0.01" value="2" required></label><label class="field span2">Notas<textarea id="notes" placeholder="Razón de entrada, aprendizaje..."></textarea></label></div><p class="muted" style="font-size:.8rem">Deja la prima de venta vacía si la posición sigue abierta. Las estadísticas solo incluyen operaciones cerradas.</p><div class="row"><button class="primary" id="saveBtn" type="submit">Guardar operación</button><button type="button" id="cancelEdit" class="hidden">Cancelar edición</button></div><p id="formError" class="error" role="alert"></p></form></section></div><section class="card list"><div class="row between"><h2 id="selectedLabel">Operaciones del día</h2><div class="row"><button id="exportCsv">Exportar CSV</button><button id="refresh">Actualizar</button></div></div><div id="tradeList" class="muted">Sin operaciones para este día.</div></section><p class="footer">Datos de operaciones manuales. Fórmula: (prima venta − prima compra) × 100 × contratos − comisiones. No incluye asignaciones, ejercicios ni posiciones parciales.</p></div></div>
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script><script>
 'use strict';
-const URL="https://ldlzwwmmazkhemlqjtbo.supabase.co";
-const KEY="sb_publishable_Q1PzcUx0a8HEiK0R6oivrQ_JW6RJtuN";
-const db=window.supabase.createClient(URL,KEY,{auth:{autoRefreshToken:true,persistSession:true,detectSessionInUrl:false}});
+const SUPABASE_URL = 'https://ldlzwwmmazkhemlqjtbo.supabase.co';
+const KEY = 'sb_publishable_Q1PzcUx0a8HEiK0R6oivrQ_JW6RJtuN';
+
+const db = window.supabase.createClient(
+  SUPABASE_URL,
+  KEY,
+  {
+    auth: {
+      autoRefreshToken: true,
+      persistSession: true,
+      detectSessionInUrl: false
+    }
+  }
+);
 const $=id=>document.getElementById(id);const now=new Date();const localISO=d=>[d.getFullYear(),String(d.getMonth()+1).padStart(2,'0'),String(d.getDate()).padStart(2,'0')].join('-');let selected=localISO(now),month=new Date(now.getFullYear(),now.getMonth(),1),trades=[],editId=null,uid=null;
 const money=n=>(n<0?'−':'')+'$'+Math.abs(n).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});const pnl=t=>t.sell_price===null?null:(Number(t.sell_price)-Number(t.buy_price))*100*Number(t.contracts)-Number(t.commission);
 const safe=s=>String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));const sum=arr=>arr.reduce((a,t)=>a+(pnl(t)??0),0);const closed=arr=>arr.filter(t=>pnl(t)!==null);
