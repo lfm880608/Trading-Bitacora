@@ -108,7 +108,8 @@ let journalChecklists=[],checklistEditId=null,checklistLoaded=false,checklistBus
 const checklistItems=[['fed','Fed y datos económicos','Fecha y hora revisadas'],['earnings','Earnings del ticker','Fecha y riesgo revisados'],['bollinger','Bandas de Bollinger','15 min, 1 hora y diario'],['averages','Promedios móviles','1 hora y diario'],['breakout','Ruptura de tendencia','Confirmación según mi estrategia'],['gap','Gap al alza o a la baja','Contexto y dirección revisados'],['spread','Bid / ask y liquidez','Spread revisado'],['expiration','Vencimiento del contrato','Fecha verificada'],['risk','TP, SL y riesgo definidos','Sé cuánto planeo arriesgar'],['oco','Orden OCO preparada','Cantidades y precios revisados'],['mind','Entrada por mi plan','Sin perseguir precio ni recuperar pérdidas']];
 const checklistFields=['expiry','qty','entry','tp','sl','buy','sell','notes'];
 
-const $=id=>document.getElementById(id),usd=n=>(n<0?'−':'')+'$'+Math.abs(n).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});let rows=[],closed=[],unmatched=[],displayMonth=new Date(2026,9,1),netTransfers=0;const STORAGE_KEY="tradingJournalSchwabFullHistoryV2";
+function currentCalendarMonth(){const now=new Date();return new Date(now.getFullYear(),now.getMonth(),1)}
+const $=id=>document.getElementById(id),usd=n=>(n<0?'−':'')+'$'+Math.abs(n).toLocaleString('en-US',{minimumFractionDigits:2,maximumFractionDigits:2});let rows=[],closed=[],unmatched=[],displayMonth=currentCalendarMonth(),netTransfers=0;const STORAGE_KEY="tradingJournalSchwabFullHistoryV2";
 function parseCSV(s){let out=[],row=[],v='',quoted=false;for(let i=0;i<s.length;i++){let c=s[i];if(c==='"'){if(quoted&&s[i+1]==='"'){v+='"';i++}else quoted=!quoted}else if(c===','&&!quoted){row.push(v);v=''}else if((c==='\n'||c==='\r')&&!quoted){if(c==='\r'&&s[i+1]==='\n')i++;row.push(v);if(row.some(x=>x.trim()))out.push(row);row=[];v=''}else v+=c}if(v||row.length){row.push(v);out.push(row)}let heads=out.shift().map(x=>x.trim());return out.map(r=>Object.fromEntries(heads.map((h,i)=>[h,r[i]||''])))}
 const num=s=>Number(String(s||'').replace(/[$,\s]/g,'').replace(/^\((.*)\)$/,'-$1'))||0;const date=s=>{const m=String(s??'').trim().match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})(?:\s+as of\s+\d{1,2}\/\d{1,2}\/\d{4})?$/i);if(!m)return '';const mm=Number(m[1]),dd=Number(m[2]),yy=Number(m[3]);const d=new Date(Date.UTC(yy,mm-1,dd));if(d.getUTCFullYear()!==yy||d.getUTCMonth()!==mm-1||d.getUTCDate()!==dd)return '';return `${yy}-${String(mm).padStart(2,'0')}-${String(dd).padStart(2,'0')}`};const ticker=s=>String(s||'').split(' ')[0];const isOption=s=>/\d{2}\/\d{2}\/\d{4}\s+[\d.]+\s+[CP]$/.test(s||'');
 function compute(){closed=[];unmatched=[];netTransfers=0;let queues=new Map(),errors=[],transfers=0;const chronological=[...rows].map((r,i)=>({...r,_i:i,_date:date(r.Date)})).sort((a,b)=>a._date.localeCompare(b._date)||(Number.isInteger(a._sourceOrder)&&Number.isInteger(b._sourceOrder)?b._sourceOrder-a._sourceOrder:b._i-a._i));for(const r of chronological){let act=(r.Action||'').toLowerCase().trim(),sym=(r.Symbol||'').trim(),qty=Math.abs(num(r.Quantity)),amount=num(r.Amount),fee=Math.abs(num(r['Fees & Comm'])),price=num(r.Price),option=isOption(sym),mult=option?100:1;if(act.includes('journal')||act.includes('moneylink')){netTransfers+=amount;transfers++;continue}if(!sym||!qty)continue;let direction=act.includes('buy to open')?'long':act.includes('sell to open')?'short':act.includes('buy to close')?'closeShort':act.includes('sell to close')?'closeLong':act==='buy'?'buy':act==='sell'?'sell':act.includes('expired')?'expired':'';if(!direction)continue;let key=sym;let q=queues.get(key)||[];queues.set(key,q);let opening=direction==='long'||direction==='short'||direction==='buy';let closing=direction==='closeLong'||direction==='closeShort'||direction==='sell'||direction==='expired';if(opening){q.push({qty,unit:Math.abs(amount)/qty,action:direction,date:r._date,mult});continue}if(closing){let remaining=qty,net=0,matched=0,basis=0;while(remaining>0.0000001&&q.length){let lot=q[0];if((direction==='closeShort'&&lot.action!=='short')||(direction==='closeLong'&&lot.action==='short'))break;let take=Math.min(remaining,lot.qty),sellUnit=direction==='expired'?0:amount/qty;net+=lot.action==='short'?(lot.unit-sellUnit)*take:(sellUnit-lot.unit)*take;matched+=take;basis+=Math.abs(lot.unit*take);lot.qty-=take;remaining-=take;if(lot.qty<0.0000001)q.shift()}if(matched)closed.push({reviewKey:r._transactionKey?'schwab:'+r._transactionKey:null,date:r._date,sym,kind:option?'Opción':'Acción',qty:matched,pnl:net,basis});if(remaining>0.0000001)errors.push({sym,qty:remaining,date:r._date,action:r.Action})}}
@@ -130,6 +131,19 @@ function renderDayDetails(){
 }
 $('calendar').addEventListener('click',e=>{const b=e.target.closest('button[data-date]');if(!b)return;selectedDay=b.dataset.date;calendar();renderDayDetails();if(matchMedia('(max-width:1000px)').matches)$('dayDetails').scrollIntoView({behavior:'smooth',block:'start'})});
 $('calendarToday').onclick=()=>{const now=new Date();displayMonth=new Date(now.getFullYear(),now.getMonth(),1);selectedDay=now.getFullYear()+'-'+String(now.getMonth()+1).padStart(2,'0')+'-'+String(now.getDate()).padStart(2,'0');calendar();renderDayDetails()};
+function resetCalendarMonth(){
+ displayMonth=currentCalendarMonth();
+ selectedDay=null;
+ calendar();
+ renderDayDetails();
+}
+// Al reabrir Safari o restaurar una página, empezar en el mes actual local.
+document.addEventListener('visibilitychange',()=>{
+ if(document.visibilityState==='visible')resetCalendarMonth();
+});
+window.addEventListener('pageshow',event=>{
+ if(event.persisted)resetCalendarMonth();
+});
 const SUPABASE_URL='https://ldlzwwmmazkhemlqjtbo.supabase.co';
 const SUPABASE_KEY='sb_publishable_Q1PzcUx0a8HEiK0R6oivrQ_JW6RJtuN';
 const db=window.supabase.createClient(SUPABASE_URL,SUPABASE_KEY);
